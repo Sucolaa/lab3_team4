@@ -1,0 +1,157 @@
+---
+title: "EDA"
+author: "Su Xu"
+date: "2023-02-21"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(readxl)
+library(scales)
+library(forcats)
+```
+
+## read table and tidy
+
+```{r, warning=FALSE}
+sdb <- read_excel("./data/SDB_Data for Stats Consult_O'Connell&Knott_2.17.23.xlsx",
+                  sheet = 1,
+                  col_names = T)
+```
+
+```{r}
+new_sdb <- sdb[!duplicated(sdb$`Event ID`),]
+```
+
+** first explore
+```{r}
+unique(new_sdb$`Focal Orangutan ID`)
+new_sdb %>% 
+  filter(`Focal Orangutan ID`== "Dinda (Linda?)")
+# one variables cannot be confirmed, remove.
+new_sdb %>% 
+  filter(`Focal Orangutan ID`!= "Dinda (Linda?)") -> new_sdb
+
+unique(new_sdb$`Age-Sex of Focal`)
+unique(new_sdb$`Social Y or N`)
+```
+
+** Y or N dist.
+
+```{r}
+freq_table <- table(new_sdb$`Social Y or N`)
+freq_df <- data.frame(variable = names(freq_table), freq = freq_table)
+freq_df %>% 
+  mutate(rate = round(freq.Freq/sum(freq.Freq),digits = 3)) -> freq_df
+freq_df$variable <- factor(freq_df$variable, levels = c("Y","N"))
+
+ggplot(data = freq_df,
+       aes(x = variable,
+           y = freq.Freq)) +
+  geom_bar(fill = "black",
+           stat = "identity") +
+  geom_text(aes(label = freq.Freq), 
+            vjust = -0.5, hjust = 1) +
+  geom_text(aes(label = percent(rate)), 
+            vjust = -0.5, hjust = -0.5) +
+  labs(x = "Social(Yes or No)",
+       y = "Social Activity Account") +
+  theme_classic()
+```
+
+## explore more on the social event by age-sex of focal
+
+```{r}
+new_sdb %>% 
+  filter(`Social Y or N` == "N")  -> new_sdbn
+nasf <- table(new_sdbn$`Age-Sex of Focal`)
+nasf_df <- data.frame(variable = names(nasf), freq = nasf)
+colnames(nasf_df) <- c("variable", "freq.Var1", "Nfreq")
+
+new_sdb %>% 
+  filter(`Social Y or N` == "Y")  -> new_sdby
+yasf <- table(new_sdby$`Age-Sex of Focal`)
+yasf_df <- data.frame(variable = names(yasf), freq = yasf)
+colnames(yasf_df) <- c("variable", "freq.Var1", "Yfreq")
+
+asf_df <- full_join(yasf_df,nasf_df)
+pivot_longer(asf_df,
+             cols = c("Yfreq", "Nfreq"),
+             names_to = "YN",
+             values_to = "freq") %>% 
+  select(variable, YN, freq) -> asf_df
+
+asf_df$YN <- factor(asf_df$YN, levels = c("Yfreq","Nfreq"))
+asf_df$variable <- factor(asf_df$variable, levels = c("Adol Female",
+                                                      "Adult Female",
+                                                      "Unflanged",
+                                                      "Flanged"))
+
+## plot
+ggplot(data = asf_df,
+       aes(x = variable,
+           y = freq,
+           color = YN,
+           fill = YN)) +
+  geom_histogram(stat = "identity",
+                 position=position_dodge()) +
+  geom_text(aes(label = freq,
+                x = variable,
+                y = freq,
+                group = YN),
+            position = position_dodge(width = 1),
+            vjust = -0.5,
+            color = "black") +
+  labs(x = "Age and Sex of Focal Orangutan",
+       y = "Frequency",
+       color = paste("Succesful\nSocial?"),
+       fill = "Succesful\nSocial?") +
+  scale_fill_discrete(labels = c("Yes", "No")) +
+  scale_color_discrete(labels = c("Yes", "No")) +
+  theme_classic()
+``` 
+
+### social distribution by each Orangutan
+
+```{r}
+focal <- table(new_sdb$`Focal Orangutan ID`)
+focal_df <- data.frame(variable = names(focal), freq = focal)
+focal_df[order(focal_df$freq.Freq,decreasing = TRUE),] -> focal_df
+
+ggplot(data = focal_df,
+       aes(x = reorder(variable, freq.Freq),
+           y = freq.Freq)) +
+  geom_bar(stat = "identity",
+           fill = "black") +
+  geom_text(aes(label = freq.Freq,
+                x = reorder(variable, freq.Freq),
+                y = freq.Freq),
+            position = position_dodge(width = 1),
+            hjust = -0.2,
+            color = "black",
+            size = 3) +
+  labs(x = "Orangutan's name",
+       y = "social frequency")+
+  coord_flip() +
+  theme_classic()
+```
+
+```{r}
+focal_yn <- table(new_sdb$`Focal Orangutan ID`, new_sdb$`Social Y or N`)
+focal_yn_df <- as.data.frame(focal_yn)
+colnames(focal_yn_df) <- c("name", "social", "freq")
+focal_yn_df$social <- factor(focal_yn_df$social, levels = c("N", "Y"))
+
+focal_yn_df %>% 
+  ggplot(aes(x = reorder(name, freq),
+             y = freq,
+             group = social,
+             fill = social,
+             color = social)) +
+  geom_bar(stat = "identity",
+           position=position_dodge()) +
+  coord_flip()
+```
+
