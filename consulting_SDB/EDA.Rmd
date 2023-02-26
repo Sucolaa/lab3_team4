@@ -53,17 +53,20 @@ ggplot(data = freq_df,
   geom_bar(fill = "black",
            stat = "identity") +
   geom_text(aes(label = freq.Freq), 
-            vjust = -0.5, hjust = 1) +
+            vjust = -0.3, hjust = 1) +
   geom_text(aes(label = percent(rate)), 
-            vjust = -0.5, hjust = -0.5) +
+            vjust = -0.3, hjust = -0.5) +
   labs(x = "Social(Yes or No)",
-       y = "Social Activity Account") +
-  theme_classic()
+       y = "Social Event Account",
+       title = "Social Event Frequency") +
+  theme_classic() +
+  theme(plot.title = element_text(hjust = 0.5,
+                                  face = "bold"))
 ```
 
 ## explore more on the social event by age-sex of focal
 
-```{r}
+```{r, warning=FALSE}
 new_sdb %>% 
   filter(`Social Y or N` == "N")  -> new_sdbn
 nasf <- table(new_sdbn$`Age-Sex of Focal`)
@@ -106,11 +109,14 @@ ggplot(data = asf_df,
             color = "black") +
   labs(x = "Age and Sex of Focal Orangutan",
        y = "Frequency",
+       title = "Different Age-Sex Orangutans Social Events Situation",
        color = paste("Succesful\nSocial?"),
        fill = "Succesful\nSocial?") +
   scale_fill_discrete(labels = c("Yes", "No")) +
   scale_color_discrete(labels = c("Yes", "No")) +
-  theme_classic()
+  theme_classic() +
+  theme(plot.title = element_text(hjust = 0.5,
+                                  face = "bold"))
 ``` 
 
 ### social distribution by each Orangutan
@@ -133,9 +139,12 @@ ggplot(data = focal_df,
             color = "black",
             size = 3) +
   labs(x = "Orangutan's name",
-       y = "social frequency")+
+       y = "social frequency",
+       title = "Focal Orangutan's Social Events Frequency")+
   coord_flip() +
-  theme_classic()
+  theme_classic() +
+  theme(plot.title = element_text(hjust = 0.5,
+                                  face = "bold"))
 ```
 
 ```{r}
@@ -153,5 +162,112 @@ focal_yn_df %>%
   geom_bar(stat = "identity",
            position=position_dodge()) +
   coord_flip()
+```
+
+## for Walimah
+
+```{r}
+new_sdb %>% 
+  filter(`Focal Orangutan ID` == "Walimah") -> wali
+wali$`Social Y or N` <- factor(wali$`Social Y or N`,
+                               levels = c("Y", "N"))
+
+ggplot(data = wali,
+       aes(x = `Social Y or N`)) +
+  geom_bar(stat = "count",
+           fill = "black")
+```
+
+```{r}
+new_sdb[!duplicated(new_sdb$`Focal Orangutan ID`),] %>% 
+  mutate(sex = ifelse(`Age-Sex of Focal` == "Adult Female" | `Age-Sex of Focal` == "Adol Female", "female", "male")) %>% 
+  group_by(sex) %>% 
+  count() %>% 
+  ggplot(aes(x = sex,
+             y = n)) +
+  geom_bar(stat = "identity",
+           fill = "black") +
+  geom_text(aes(label = n),
+            vjust = -0.45) +
+  labs(x = "Biological Sex",
+       y = "count",
+       title = "Focal Orangutan's Biological Sex Distribution") +
+  theme_classic() +
+  theme(plot.title = element_text(hjust = 0.5,
+                                  face = "bold"))
+```
+
+```{r}
+new_sdb %>% 
+  mutate(party_num = case_when(is.na(`Partner 1 Name`) == TRUE ~ "no social",
+                               is.na(`Partner 1 Name`) == FALSE & is.na(`Partner 2 Name`) == TRUE & is.na(`Partner 3 Name`) == TRUE & is.na(`Partner 4 Name`) == TRUE ~ "1 partner",
+                               is.na(`Partner 1 Name`) == FALSE & is.na(`Partner 2 Name`) == FALSE & is.na(`Partner 3 Name`) == TRUE & is.na(`Partner 4 Name`) == TRUE ~ "2 partners",
+                               is.na(`Partner 1 Name`) == FALSE & is.na(`Partner 2 Name`) == FALSE & is.na(`Partner 3 Name`) == FALSE & is.na(`Partner 4 Name`) == TRUE ~ "3 partners",
+                               is.na(`Partner 1 Name`) == FALSE & is.na(`Partner 2 Name`) == FALSE & is.na(`Partner 3 Name`) == FALSE & is.na(`Partner 4 Name`) == FALSE ~ "4 partners")) %>% 
+  group_by(party_num) %>% 
+  count() -> sdb_party_num
+
+sdb_party_num %>% 
+  mutate(rate = round(n/sum(sdb_party_num$n),digits = 3)) -> sdb_party_num
+
+sdb_party_num$party_num <- factor(sdb_party_num$party_num,
+                                  levels = c("no social",
+                                             "1 partner",
+                                             "2 partners",
+                                             "3 partners",
+                                             "4 partners"))
+sdb_party_num %>% 
+  ggplot(aes(x = party_num,
+             y = n)) +
+  geom_bar(stat = "identity",
+           fill = "black") +
+  geom_text(aes(label = n),
+            vjust = -0.4,
+            hjust = 1.2) +
+  geom_text(aes(label = percent(rate)),
+            vjust = -0.4,
+            hjust = -0.2) +
+  labs(x = "social event's partner number",
+       y = "acount",
+       title = "Focal Orangutan's Social Events Partner Distribution") +
+  theme_classic() +
+  theme(plot.title = element_text(hjust = 0.5,
+                                  face = "bold"))
+```
+
+```{r}
+new_sdb %>% 
+  mutate(party_num = case_when(is.na(`Partner 1 Name`) == TRUE ~ "no social",
+                               is.na(`Partner 1 Name`) == FALSE & is.na(`Partner 2 Name`) == TRUE & is.na(`Partner 3 Name`) == TRUE & is.na(`Partner 4 Name`) == TRUE ~ "1 partner",
+                               is.na(`Partner 1 Name`) == FALSE & is.na(`Partner 2 Name`) == FALSE & is.na(`Partner 3 Name`) == TRUE & is.na(`Partner 4 Name`) == TRUE ~ "2 partners",
+                               is.na(`Partner 1 Name`) == FALSE & is.na(`Partner 2 Name`) == FALSE & is.na(`Partner 3 Name`) == FALSE & is.na(`Partner 4 Name`) == TRUE ~ "3 partners",
+                               is.na(`Partner 1 Name`) == FALSE & is.na(`Partner 2 Name`) == FALSE & is.na(`Partner 3 Name`) == FALSE & is.na(`Partner 4 Name`) == FALSE ~ "4 partners")) %>% 
+  group_by(`Age-Sex of Focal`) %>% 
+  count(party_num) -> age_sex_party
+
+age_sex_party$party_num <- factor(age_sex_party$party_num,
+                                  levels = c("no social",
+                                             "1 partner",
+                                             "2 partners",
+                                             "3 partners",
+                                             "4 partners"))
+
+age_sex_party %>% 
+  ggplot(aes(x = party_num,
+             y = n)) +
+  geom_bar(stat = "identity",
+           fill = "black") +
+  geom_text(aes(label = ifelse(n <= 20, n, "")),
+            vjust = -0.4) +
+  geom_text(aes(label = ifelse(n > 20, n, "")),
+            vjust = 1.2,
+            color = "white") +
+  labs(x = "social event's partner number",
+       y = "acount",
+       title = "Focal Orangutan's Social Events Partner Distribution") +
+  facet_wrap(~`Age-Sex of Focal`) +
+  theme_classic() +
+  theme(plot.title = element_text(hjust = 0.5,
+                                  face = "bold"))
 ```
 
