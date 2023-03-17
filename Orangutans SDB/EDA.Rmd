@@ -1,0 +1,58 @@
+---
+title: "EDA"
+author: "hao he"
+date: "2023-02-27"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(readxl)
+```
+
+Orangutans, in general, are semi-solitary given low fruit availability. But they do form associations during periods of high fruit availability. To understand if socializing could be stressful and how it contributes to the solitary/sociality activities, a bunch of situations where social stress may be incurred is explored. SDB as a measure of social anxiety.
+
+# Load data
+
+```{r load raw data, warning=FALSE}
+sdb_raw<- read_excel("SDB_Data for Stats Consult_O'Connell&Knott_2.17.23.xlsx",sheet = 1,col_names = T)
+
+# check missing values: 
+sdb_raw %>% summarise_all(~(sum(is.na(.))))
+# NA appears only on partner's info: name, age-sex
+```
+
+## Explore age-sex combination, count of each combination, and corresponding average SDB
+
+```{r raw data}
+# AveSDBEventID --  average sdb for each event
+
+# sdb_raw %>% add_count(`Age-Sex of Focal`, name = "count_AgeSex") %>% group_by(`Age-Sex of Focal`) %>% summarise(AvgSDB_AgeSex = mean(`SDB Rate`))
+
+by_agesex<- sdb_raw %>% group_by(`Age-Sex of Focal`) %>% summarise(n = n(),AvgSDB_AgeSex = mean(`SDB Rate`))
+by_agesex
+ 
+by_agesex %>% ggplot(aes(x = `Age-Sex of Focal`,y=AvgSDB_AgeSex, fill=`Age-Sex of Focal`)) +geom_bar( stat="identity") + labs(title = "Age-sex combination and corresponding average SDB", fill= "Age-Sex Combination of Focal") 
+  
+
+```
+
+# two predictions need to be validated with our EDA result
+
+**Socializing effect** - Rate of SDB is higher when orangutans are social versus when they are alone.
+
+```{r distinct event id}
+by_social <- sdb_raw %>% group_by(`Social Y or N`) %>% summarise(n = n(),AvgSDB_social = mean(`SDB Rate`))
+ 
+by_social %>% ggplot(aes(x = `Social Y or N`,y=AvgSDB_social, fill=`Social Y or N`)) +geom_bar( stat="identity") + labs(title = "Social status of Focal and corresponding average SDB", fill= "Social status of Focal")
+```
+
+**Buffering Effect** - For adolescent females, socializing with adult females or flanged males is associated with elevated SDB rate, while socializing with unflagged males or other adolescent females is associated with no change in rate of SDB.
+
+```{r buffering effect}
+social_AdolF<- sdb_raw %>% filter(`Age-Sex of Focal` == "Adol Female" &`Social Y or N` == "Y") 
+
+
+
+```
