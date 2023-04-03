@@ -1,0 +1,485 @@
+---
+title: "EDA"
+author: "Su Xu"
+date: "2023-02-21"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(readxl)
+library(scales)
+library(forcats)
+library(ggpubr)
+library(lme4)
+library(lmerTest)
+library(lemon)
+```
+
+## read table and tidy
+
+```{r, warning=FALSE}
+sdb <- read_excel("./data/SDB_Data for Stats Consult_O'Connell&Knott_2.17.23.xlsx",
+                  sheet = 1,
+                  col_names = T)
+```
+
+```{r}
+new_sdb <- sdb[!duplicated(sdb$`Event ID`),]
+```
+
+** first explore
+```{r render=lemon_print}
+unique(new_sdb$`Focal Orangutan ID`)
+new_sdb %>% 
+  filter(`Focal Orangutan ID`== "Dinda (Linda?)")
+# one variables cannot be confirmed, remove.
+new_sdb %>% 
+  filter(`Focal Orangutan ID`!= "Dinda (Linda?)") -> new_sdb
+
+unique(new_sdb$`Age-Sex of Focal`)
+unique(new_sdb$`Social Y or N`)
+```
+
+** Y or N dist.
+
+```{r}
+freq_table <- table(new_sdb$`Social Y or N`)
+freq_df <- data.frame(variable = names(freq_table), freq = freq_table)
+freq_df %>% 
+  mutate(rate = round(freq.Freq/sum(freq.Freq),digits = 3)) -> freq_df
+freq_df$variable <- factor(freq_df$variable, levels = c("Y","N"))
+
+ggplot(data = freq_df,
+       aes(x = variable,
+           y = freq.Freq)) +
+  geom_bar(fill = "black",
+           stat = "identity") +
+  geom_text(aes(label = freq.Freq), 
+            vjust = -0.3, hjust = 1) +
+  geom_text(aes(label = percent(rate)), 
+            vjust = -0.3, hjust = -0.5) +
+  labs(x = "Social(Yes or No)",
+       y = "Social Event Account",
+       title = "Social Event Frequency") +
+  theme_classic() +
+  theme(plot.title = element_text(hjust = 0.5,
+                                  face = "bold"))
+```
+
+## explore more on the social event by age-sex of focal
+
+```{r, warning=FALSE}
+new_sdb %>% 
+  filter(`Social Y or N` == "N")  -> new_sdbn
+nasf <- table(new_sdbn$`Age-Sex of Focal`)
+nasf_df <- data.frame(variable = names(nasf), freq = nasf)
+colnames(nasf_df) <- c("variable", "freq.Var1", "Nfreq")
+
+new_sdb %>% 
+  filter(`Social Y or N` == "Y")  -> new_sdby
+yasf <- table(new_sdby$`Age-Sex of Focal`)
+yasf_df <- data.frame(variable = names(yasf), freq = yasf)
+colnames(yasf_df) <- c("variable", "freq.Var1", "Yfreq")
+
+asf_df <- full_join(yasf_df,nasf_df)
+pivot_longer(asf_df,
+             cols = c("Yfreq", "Nfreq"),
+             names_to = "YN",
+             values_to = "freq") %>% 
+  select(variable, YN, freq) -> asf_df
+
+asf_df$YN <- factor(asf_df$YN, levels = c("Yfreq","Nfreq"))
+asf_df$variable <- factor(asf_df$variable, levels = c("Adol Female",
+                                                      "Adult Female",
+                                                      "Unflanged",
+                                                      "Flanged"))
+
+## plot
+ggplot(data = asf_df,
+       aes(x = variable,
+           y = freq,
+           color = YN,
+           fill = YN)) +
+  geom_histogram(stat = "identity",
+                 position=position_dodge()) +
+  geom_text(aes(label = freq,
+                x = variable,
+                y = freq,
+                group = YN),
+            position = position_dodge(width = 1),
+            vjust = -0.5,
+            color = "black") +
+  labs(x = "Age and Sex of Focal Orangutan",
+       y = "Frequency",
+       title = "Different Age-Sex Orangutans Social Events Situation",
+       color = paste("Succesful\nSocial?"),
+       fill = "Succesful\nSocial?") +
+  scale_fill_discrete(labels = c("Yes", "No")) +
+  scale_color_discrete(labels = c("Yes", "No")) +
+  theme_classic() +
+  theme(plot.title = element_text(hjust = 0.5,
+                                  face = "bold"))
+``` 
+
+
+
+### social distribution by each Orangutan
+
+```{r}
+focal <- table(new_sdb$`Focal Orangutan ID`)
+focal_df <- data.frame(variable = names(focal), freq = focal)
+focal_df[order(focal_df$freq.Freq,decreasing = TRUE),] -> focal_df
+
+ggplot(data = focal_df,
+       aes(x = reorder(variable, freq.Freq),
+           y = freq.Freq)) +
+  geom_bar(stat = "identity",
+           fill = "black") +
+  geom_text(aes(label = freq.Freq,
+                x = reorder(variable, freq.Freq),
+                y = freq.Freq),
+            position = position_dodge(width = 1),
+            hjust = -0.2,
+            color = "black",
+            size = 3) +
+  labs(x = "Orangutan's name",
+       y = "social frequency",
+       title = "Focal Orangutan's Social Events Frequency")+
+  coord_flip() +
+  theme_classic() +
+  theme(plot.title = element_text(hjust = 0.5,
+                                  face = "bold"))
+```
+
+```{r}
+focal_yn <- table(new_sdb$`Focal Orangutan ID`, new_sdb$`Social Y or N`)
+focal_yn_df <- as.data.frame(focal_yn)
+colnames(focal_yn_df) <- c("name", "social", "freq")
+focal_yn_df$social <- factor(focal_yn_df$social, levels = c("N", "Y"))
+
+focal_yn_df %>% 
+  ggplot(aes(x = reorder(name, freq),
+             y = freq,
+             group = social,
+             fill = social,
+             color = social)) +
+  geom_bar(stat = "identity",
+           position=position_dodge()) +
+  coord_flip()
+```
+
+## for Walimah
+
+```{r}
+new_sdb %>% 
+  filter(`Focal Orangutan ID` == "Walimah") -> wali
+wali$`Social Y or N` <- factor(wali$`Social Y or N`,
+                               levels = c("Y", "N"))
+
+ggplot(data = wali,
+       aes(x = `Social Y or N`)) +
+  geom_bar(stat = "count",
+           fill = "black")
+```
+
+```{r}
+new_sdb[!duplicated(new_sdb$`Focal Orangutan ID`),] %>% 
+  mutate(sex = ifelse(`Age-Sex of Focal` == "Adult Female" | `Age-Sex of Focal` == "Adol Female", "female", "male")) %>% 
+  group_by(sex) %>% 
+  count() %>% 
+  ggplot(aes(x = sex,
+             y = n)) +
+  geom_bar(stat = "identity",
+           fill = "black") +
+  geom_text(aes(label = n),
+            vjust = -0.45) +
+  labs(x = "Biological Sex",
+       y = "count",
+       title = "Focal Orangutan's Biological Sex Distribution") +
+  theme_classic() +
+  theme(plot.title = element_text(hjust = 0.5,
+                                  face = "bold"))
+```
+
+```{r}
+new_sdb %>% 
+  mutate(party_num = case_when(is.na(`Partner 1 Name`) == TRUE ~ "no social",
+                               is.na(`Partner 1 Name`) == FALSE & is.na(`Partner 2 Name`) == TRUE & is.na(`Partner 3 Name`) == TRUE & is.na(`Partner 4 Name`) == TRUE ~ "1 partner",
+                               is.na(`Partner 1 Name`) == FALSE & is.na(`Partner 2 Name`) == FALSE & is.na(`Partner 3 Name`) == TRUE & is.na(`Partner 4 Name`) == TRUE ~ "2 partners",
+                               is.na(`Partner 1 Name`) == FALSE & is.na(`Partner 2 Name`) == FALSE & is.na(`Partner 3 Name`) == FALSE & is.na(`Partner 4 Name`) == TRUE ~ "3 partners",
+                               is.na(`Partner 1 Name`) == FALSE & is.na(`Partner 2 Name`) == FALSE & is.na(`Partner 3 Name`) == FALSE & is.na(`Partner 4 Name`) == FALSE ~ "4 partners")) %>% 
+  group_by(party_num) %>% 
+  count() -> sdb_party_num
+
+sdb_party_num %>% 
+  mutate(rate = round(n/sum(sdb_party_num$n),digits = 3)) -> sdb_party_num
+
+sdb_party_num$party_num <- factor(sdb_party_num$party_num,
+                                  levels = c("no social",
+                                             "1 partner",
+                                             "2 partners",
+                                             "3 partners",
+                                             "4 partners"))
+sdb_party_num %>% 
+  ggplot(aes(x = party_num,
+             y = n)) +
+  geom_bar(stat = "identity",
+           fill = "black") +
+  geom_text(aes(label = n),
+            vjust = -0.4,
+            hjust = 1.2) +
+  geom_text(aes(label = percent(rate)),
+            vjust = -0.4,
+            hjust = -0.2) +
+  labs(x = "social event's partner number",
+       y = "acount",
+       title = "Focal Orangutan's Social Events Partner Distribution") +
+  theme_classic() +
+  theme(plot.title = element_text(hjust = 0.5,
+                                  face = "bold"))
+```
+
+```{r}
+new_sdb %>% 
+  mutate(party_num = case_when(is.na(`Partner 1 Name`) == TRUE ~ "no social",
+                               is.na(`Partner 1 Name`) == FALSE & is.na(`Partner 2 Name`) == TRUE & is.na(`Partner 3 Name`) == TRUE & is.na(`Partner 4 Name`) == TRUE ~ "1 partner",
+                               is.na(`Partner 1 Name`) == FALSE & is.na(`Partner 2 Name`) == FALSE & is.na(`Partner 3 Name`) == TRUE & is.na(`Partner 4 Name`) == TRUE ~ "2 partners",
+                               is.na(`Partner 1 Name`) == FALSE & is.na(`Partner 2 Name`) == FALSE & is.na(`Partner 3 Name`) == FALSE & is.na(`Partner 4 Name`) == TRUE ~ "3 partners",
+                               is.na(`Partner 1 Name`) == FALSE & is.na(`Partner 2 Name`) == FALSE & is.na(`Partner 3 Name`) == FALSE & is.na(`Partner 4 Name`) == FALSE ~ "4 partners")) %>% 
+  group_by(`Age-Sex of Focal`) %>% 
+  count(party_num) -> age_sex_party
+
+age_sex_party$party_num <- factor(age_sex_party$party_num,
+                                  levels = c("no social",
+                                             "1 partner",
+                                             "2 partners",
+                                             "3 partners",
+                                             "4 partners"))
+
+age_sex_party %>% 
+  ggplot(aes(x = party_num,
+             y = n)) +
+  geom_bar(stat = "identity",
+           fill = "black") +
+  geom_text(aes(label = ifelse(n <= 20, n, "")),
+            vjust = -0.4) +
+  geom_text(aes(label = ifelse(n > 20, n, "")),
+            vjust = 1.2,
+            color = "white") +
+  labs(x = "social event's partner number",
+       y = "acount",
+       title = "Focal Orangutan's Social Events Partner Distribution") +
+  facet_wrap(~`Age-Sex of Focal`) +
+  theme_classic() +
+  theme(plot.title = element_text(hjust = 0.5,
+                                  face = "bold"))
+```
+
+```{r}
+#social event with only adolescent present
+new_sdb %>% 
+  filter(`Age-Sex of Focal` == "Adol Female") %>% 
+  filter(`#AdultFemPreent` == 1 | `#FlangedPresent` == 1) %>% 
+  filter(`#AdoFemPresent` == 0 & `#UnflangedPresent` == 0) -> adult_part
+
+#social event with both adolescent and adult present
+new_sdb %>% 
+  filter(`Age-Sex of Focal` == "Adol Female") %>% 
+  filter(`#AdultFemPreent` == 1 | `#FlangedPresent` == 1) %>% 
+  filter(`#AdoFemPresent` == 1 | `#UnflangedPresent` == 1) -> both_part
+
+#buil group and join two tables.
+adult_part %>% 
+  select(`Event ID`, AveSDBEventID) %>% 
+  mutate(group = "adult_partner") -> adult_part
+both_part %>% 
+  select(`Event ID`, AveSDBEventID) %>% 
+  mutate(group = "both_partner") -> both_part
+full_join(both_part, adult_part) -> full_part
+
+#one-way ANOVA model
+model1 <- aov(AveSDBEventID ~ group, data = full_part)
+summary(model1)
+#p-value = 0.29, which indicates that two groups have the same average SDB rate.
+
+#visualizition
+full_part %>% 
+  ggboxplot(x = "group",
+            y = "AveSDBEventID",
+            color = "group") +
+  geom_jitter() +
+  labs(color = paste("Partner")) +
+  scale_color_discrete(labels = c("Both Partners", "Adult Partner")) +
+  theme(axis.text.x=element_blank(),
+        axis.title.x=element_blank())
+
+
+
+sdb %>% 
+  filter(AveSDBEventID >= 0.6)
+```
+
+```{r}
+full_part %>% 
+  filter(AveSDBEventID <= 0.2) -> full_part_2
+
+#visualizition
+full_part_2 %>% 
+  ggboxplot(x = "group",
+            y = "AveSDBEventID",
+            color = "group")
+
+model2 <- aov(AveSDBEventID ~ group, data = full_part_2)
+summary(model2)
+```
+
+```{r}
+#standardize the variable `AveSDBEventID` to fit the aov model.
+full_part %>% 
+  mutate(AveSDBEventID_scale = scale(AveSDBEventID)) -> full_part
+
+model3 <- aov(AveSDBEventID_scale ~ group, data = full_part)
+summary(model3)
+```
+
+
+
+```{r}
+new_sdb %>% 
+  mutate(age = case_when(new_sdb$`Age-Sex of Focal` == "Adult Female" ~ "adult",
+                         new_sdb$`Age-Sex of Focal` == "Adol Female" ~ "adol",
+                         new_sdb$`Age-Sex of Focal` == "Flanged" ~ "adult",
+                         TRUE ~ "adol"),
+         sex = case_when(new_sdb$`Age-Sex of Focal` == "Adult Female" ~ "female",
+                         new_sdb$`Age-Sex of Focal` == "Adol Female" ~ "female",
+                         new_sdb$`Age-Sex of Focal` == "Flanged" ~ "male",
+                         TRUE ~ "male")) -> new_sdb
+
+new_sdb %>% 
+  select(AveSDBEventID, 
+         age, 
+         sex, 
+         `Social Y or N`,
+         `Focal Orangutan ID`,
+         `Event ID`) -> mix_sdb
+mix_sdb %>% 
+  mutate(`Social Y or N` = factor(mix_sdb$`Social Y or N`, levels = c("Y", "N"))) -> mix_sdb
+
+glmer(AveSDBEventID ~ age + sex + `Social Y or N` + (1 | `Event ID`) + (1 | `Focal Orangutan ID`), data = mix_sdb)
+#AveSDBEventID ~ age + sex + `Social Y or N` + (1 | `Focal Orangutan ID`) + (1 | `Event ID`)
+#Error: number of levels of each grouping factor must be < number of observations (problems: Event ID)
+```
+
+
+```{r}
+#social event with only adolescent present
+sdb %>% 
+  filter(`Age-Sex of Focal` == "Adol Female") %>% 
+  filter(`#AdultFemPreent` == 1 | `#FlangedPresent` == 1) %>% 
+  filter(`#AdoFemPresent` == 0 & `#UnflangedPresent` == 0) -> adult_part
+
+#social event with both adolescent and adult present
+sdb %>% 
+  filter(`Age-Sex of Focal` == "Adol Female") %>% 
+  filter(`#AdultFemPreent` == 1 | `#FlangedPresent` == 1) %>% 
+  filter(`#AdoFemPresent` == 1 | `#UnflangedPresent` == 1) -> both_part
+
+sdb %>% 
+  filter(`Age-Sex of Focal` == "Adol Female") %>% 
+  filter(`#AdoFemPresent` == 1 | `#UnflangedPresent` == 1) %>% 
+  filter(`#AdultFemPreent` == 0 & `#FlangedPresent` == 0) -> adole_part
+
+#buil group and join two tables.
+adult_part %>% 
+  select(`Event ID`, AveSDBEventID, `SDB Rate`) %>% 
+  mutate(group = "adult_partner") -> adult_part
+both_part %>% 
+  select(`Event ID`, AveSDBEventID, `SDB Rate`) %>% 
+  mutate(group = "both_partner") -> both_part
+full_join(both_part, adult_part) -> full_part
+
+adole_part %>% 
+  dplyr::select(`Event ID`, AveSDBEventID, `SDB Rate`) %>% 
+  mutate(group = "adole_partner") -> adole_part
+
+full_join(both_part, adole_part) -> full_part_3
+
+#one-way ANOVA model
+model1 <- aov(AveSDBEventID ~ group, data = full_part)
+summary(model1)
+#p-value = 0.29, which indicates that two groups have the same average SDB rate.
+
+#visualizition
+full_part %>% 
+  ggboxplot(x = "group",
+            y = "AveSDBEventID",
+            color = "group")
+
+model2 <- aov(`SDB Rate` ~ group, data = full_part)
+summary(model2)
+
+full_part %>% 
+  ggboxplot(x = "group",
+            y = "SDB Rate",
+            color = "group")
+
+adole_part %>% 
+  ggplot(aes(x = `Focal Orangutan ID`)) +
+  geom_bar(stat = "count")
+
+full_part_3 %>% 
+  ggboxplot(x = "group",
+            y = "SDB Rate",
+            color = "group") +
+  geom_jitter() +
+  labs(color = paste("Partner")) +
+  scale_color_discrete(labels = c("Both Partners", "Adole Partner")) +
+  theme(axis.text.x=element_blank(),
+        axis.title.x=element_blank())
+full_part_3 %>% 
+  filter(group == " adole_partner")
+```
+
+```{r}
+sdb %>% 
+  mutate(age = case_when(sdb$`Age-Sex of Focal` == "Adult Female" ~ "adult",
+                         sdb$`Age-Sex of Focal` == "Adol Female" ~ "adol",
+                         sdb$`Age-Sex of Focal` == "Flanged" ~ "adult",
+                         TRUE ~ "adol"),
+         sex = case_when(sdb$`Age-Sex of Focal` == "Adult Female" ~ "female",
+                         sdb$`Age-Sex of Focal` == "Adol Female" ~ "female",
+                         sdb$`Age-Sex of Focal` == "Flanged" ~ "male",
+                         TRUE ~ "male")) -> sdb
+
+sdb %>% 
+  select(AveSDBEventID, 
+         age, 
+         sex, 
+         `Social Y or N`,
+         `Focal Orangutan ID`,
+         `Event ID`,
+         `SDB Rate`) -> mix_sdb
+mix_sdb %>% 
+  mutate(`Social Y or N` = factor(mix_sdb$`Social Y or N`, levels = c("Y", "N")),
+         `Focal Orangutan ID` = factor(mix_sdb$`Focal Orangutan ID`),
+         `Event ID` = factor(mix_sdb$`Event ID`)) -> mix_sdb
+mix_sdb %>% 
+  mutate(SDB = `SDB Rate` *10) -> mix_sdb
+
+model1 <- glmer(SDB ~ age + sex + `Social Y or N` + (1 | `Focal Orangutan ID`) + (1 | `Event ID`), 
+                data = mix_sdb,
+                family = poisson(link = "log"))
+summary(model1)
+anova(model1)
+
+
+model2 <- lmer(`SDB Rate` ~ age + sex + `Social Y or N` + (1 | `Focal Orangutan ID`) + (1 | `Event ID`), 
+                data = mix_sdb)
+summary(model2)
+
+plot(model1)
+plot(model2)
+```
+
