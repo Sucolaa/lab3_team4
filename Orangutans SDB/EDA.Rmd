@@ -1,6 +1,6 @@
 ---
-title: "EDA"
-author: "hao he"
+title: "EDA & modeling"
+author: "Hao He"
 date: "2023-02-27"
 output: html_document
 ---
@@ -9,6 +9,16 @@ output: html_document
 knitr::opts_chunk$set(echo = TRUE)
 library(tidyverse)
 library(readxl)
+library(tidyverse)
+library(readxl)
+library(scales)
+library(forcats)
+library(ggpubr)
+library(lme4)
+library(lmerTest)
+library(performance)
+library(PerformanceAnalytics)
+library(tibble)
 ```
 
 Orangutans, in general, are semi-solitary given low fruit availability. But they do form associations during periods of high fruit availability. To understand if socializing could be stressful and how it contributes to the solitary/sociality activities, a bunch of situations where social stress may be incurred is explored. SDB as a measure of social anxiety.
@@ -26,14 +36,14 @@ sdb_raw %>% summarise_all(~(sum(is.na(.))))
 ## Explore age-sex combination, count of each combination, and corresponding average SDB
 
 ```{r raw data}
-# AveSDBEventID --  average sdb for each event
+# AveSDBEventID --  refers to the average sdb for each event
 
 # sdb_raw %>% add_count(`Age-Sex of Focal`, name = "count_AgeSex") %>% group_by(`Age-Sex of Focal`) %>% summarise(AvgSDB_AgeSex = mean(`SDB Rate`))
 
 by_agesex<- sdb_raw %>% group_by(`Age-Sex of Focal`) %>% summarise(n = n(),AvgSDB_AgeSex = mean(`SDB Rate`))
 by_agesex
  
-by_agesex %>% ggplot(aes(x = `Age-Sex of Focal`,y=AvgSDB_AgeSex, fill=`Age-Sex of Focal`)) +geom_bar( stat="identity") + labs(title = "Age-sex combination and corresponding average SDB", fill= "Age-Sex Combination of Focal") 
+by_agesex %>% ggplot(aes(x = `Age-Sex of Focal`,y=AvgSDB_AgeSex, fill=`Age-Sex of Focal`)) +geom_bar( stat="identity") + labs(title = "Age-sex combination and corresponding average SDB", fill= "Age-Sex Category of Focal") 
   
 
 ```
@@ -45,14 +55,141 @@ by_agesex %>% ggplot(aes(x = `Age-Sex of Focal`,y=AvgSDB_AgeSex, fill=`Age-Sex o
 ```{r distinct event id}
 by_social <- sdb_raw %>% group_by(`Social Y or N`) %>% summarise(n = n(),AvgSDB_social = mean(`SDB Rate`))
  
-by_social %>% ggplot(aes(x = `Social Y or N`,y=AvgSDB_social, fill=`Social Y or N`)) +geom_bar( stat="identity") + labs(title = "Social status of Focal and corresponding average SDB", fill= "Social status of Focal")
+sdb_raw%>% ggplot(aes(x = `Social Y or N`,y=`SDB Rate`, fill=`Social Y or N`)) +geom_boxplot(fill ="slateblue",alpha = 0.2) + labs(title = "Social status of Focal and corresponding average SDB", fill= "Social status of Focal")
 ```
 
-**Buffering Effect** - For adolescent females, socializing with adult females or flanged males is associated with elevated SDB rate, while socializing with unflagged males or other adolescent females is associated with no change in rate of SDB.
+- For adolescent females, socializing with adult females or flanged males is associated with elevated SDB rate, while socializing with unflagged males or other adolescent females is associated with no change in rate of SDB.
 
 ```{r buffering effect}
 social_AdolF<- sdb_raw %>% filter(`Age-Sex of Focal` == "Adol Female" &`Social Y or N` == "Y") 
-
+#  using combination of Focal and partner to check the frequency
 
 
 ```
+
+# preprocess data
+```{r}
+# separate the age-sex category of Focal into two predictors
+# better interpretability for intereaction term
+sdb %>% 
+  mutate(age = case_when(sdb$`Age-Sex of Focal` == "Adult Female" ~ "adult",
+                         sdb$`Age-Sex of Focal` == "Adol Female" ~ "adol",
+                         sdb$`Age-Sex of Focal` == "Flanged" ~ "adult",
+                         TRUE ~ "adol"),
+         sex = case_when(sdb$`Age-Sex of Focal` == "Adult Female" ~ "female",
+                         sdb$`Age-Sex of Focal` == "Adol Female" ~ "female",
+                         sdb$`Age-Sex of Focal` == "Flanged" ~ "male",
+                         TRUE ~ "male")) -> sdb
+# variable selection
+sdb %>% 
+  select(AveSDBEventID, 
+         age, 
+         sex, 
+         `Social Y or N`,
+         `Focal Orangutan ID`,
+         `Event ID`,
+         `SDB Rate`) -> mix_sdb
+mix_sdb %>% 
+  mutate(`Social Y or N` = factor(mix_sdb$`Social Y or N`, levels = c("Y", "N")),
+         `Focal Orangutan ID` = factor(mix_sdb$`Focal Orangutan ID`),
+         `Event ID` = factor(mix_sdb$`Event ID`)) -> mix_sdb
+# add a new column that converts the sdb rate to the count of sdb. 
+mix_sdb %>% 
+  mutate(SDB = `SDB Rate` *10) -> mix_sdb
+```
+
+# Modeling
+
+- Fit mixed models to data
+
+## Linear Mixed Models
+```{r}
+
+# random intercept of factor "Focal Orangutan ID" and "Event ID"
+
+# starts with LMM
+lmm.fit <- lmer(`SDB Rate` ~ age * sex + `Social Y or N` + (1 | `Focal Orangutan ID`) + (1 | `Event ID`), data = mix_sdb)
+summary(lmm.fit)
+
+```
+
+# Generalized Linear Mixed Models
+Based on the nature of data - count data, GLMMs are more appropriate.
+```{r}
+# count data - then try GLMM with a poisson 
+# poi.fit <- glmer(SDB ~ age + sex + `Social Y or N` + (1 | `Focal Orangutan ID`) + (1 | `Event ID`), data = mix_sdb,family = poisson(link = "log"))
+
+poi.fit <- glmer(SDB ~ age * sex + `Social Y or N` + (1 | `Focal Orangutan ID`) + (1 | `Event ID`), data = mix_sdb,family = poisson(link = "log"))
+# Model failed to converge with max|grad| = 0.107969 (tol = 0.002, component 1)
+# Model is nearly unidentifiable: very large eigenvalue
+#  - Rescale variables?
+
+summary(poi.fit)
+```
+- Model diagnostics
+```{r}
+check_overdispersion(poi.fit)
+# Overdispersion test
+# 
+#        dispersion ratio =    1.292
+#   Pearson's Chi-Squared = 1970.885
+#                 p-value =  < 0.001
+# 
+# Overdispersion detected.
+
+
+check_zeroinflation(poi.fit)
+# Check for zero-inflation
+# 
+#    Observed zeros: 1120
+#   Predicted zeros: 1013
+#             Ratio: 0.90
+
+# Model is underfitting zeros (probable zero-inflation).
+
+
+# comprehensive visualization of model checks
+check_model(poi.fit)
+
+# check model performance
+performance(poi.fit)
+```
+
+- Found overdispersion and possible zero-inflation, so fit GLMM with a negative binomial distribution instead.
+
+```{r}
+# GLMM with a negative binomial distribution
+# nb.fit <-  glmer.nb(SDB ~ age + sex + `Social Y or N` + (1 | `Focal Orangutan ID`) + (1 | `Event ID`), data = mix_sdb)
+
+nb.fit <-  glmer.nb(SDB ~ age * sex + `Social Y or N` + (1 | `Focal Orangutan ID`) + (1 | `Event ID`), data = mix_sdb)
+# Model failed to converge with max|grad| = 0.107969 (tol = 0.002, component 1)
+# Model is nearly unidentifiable: very large eigenvalue
+#  - Rescale variables?
+
+summary(nb.fit)
+# check overdispersion
+check_overdispersion(nb.fit)
+
+
+# comprehensive visualization of model checks
+check_model(nb.fit)
+
+# check model performance
+performance(nb.fit) %>% tibble()
+```
+
+Now compare model performance
+```{r}
+mod.comparison <- compare_performance(poi.fit,nb.fit) %>% tibble()
+mod.comparison
+
+plot(compare_performance(poi.fit,nb.fit, rank = T))
+# Error in datawizard::rescale(x, exclude = "Model", to = c(0.1, 1)) :
+# lazy-load database '/Library/Frameworks/R.framework/Versions/4.2/Resources/library/datawizard/R/datawizard.rdb' is corrupt
+```
+
+
+
+
+
+
