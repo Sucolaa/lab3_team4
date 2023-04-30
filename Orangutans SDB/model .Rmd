@@ -1,5 +1,5 @@
 ---
-title: "Report - replicate result"
+title: "Report"
 author: "hao he"
 date: "2023-04-27"
 output: html_document
@@ -23,6 +23,7 @@ library(rstan)
 library(kableExtra)
 library(gridExtra)
 library(tidyr)
+library(bayesplot)
 ```
 
 ## Introduction (Background)
@@ -47,14 +48,11 @@ sdb %>% dplyr::select(AveSDBEventID,
          `#AdultFemPreent`,
          `#FlangedPresent`) -> mix_sdb
 
-# convert social state, focal id and event id to factor
-mix_sdb<- mix_sdb %>% 
-  mutate( `Age-Sex of Focal` = factor(mix_sdb$`Age-Sex of Focal`),  
-          `Social Y or N` = factor(mix_sdb$`Social Y or N`, levels = c("Y", "N")),
-         `Focal Orangutan ID` = factor(mix_sdb$`Focal Orangutan ID`),
-         `Event ID` = factor(mix_sdb$`Event ID`))
-
-
+# renmae and convert social state, focal id and event id to factor
+mix_sdb<- sdb %>% dplyr::rename(AgeSexFocal = `Age-Sex of Focal`, SocialYN = `Social Y or N`, FocalID = `Focal Orangutan ID`, EventID = `Event ID`) %>% dplyr::mutate(AgeSexFocal = factor(AgeSexFocal), SocialYN = factor(SocialYN, levels = c("Y", "N")),
+         FocalID = factor(FocalID),
+         EventID = factor(EventID))
+  
 # add a new column that converts the sdb rate to the count of sdb. 
 mix_sdb %>% 
   mutate(SDB = `SDB Rate` *10) %>% relocate(SDB) -> mix_sdb
@@ -64,12 +62,12 @@ mix_sdb %>%
 Based on the nature of data - count data, GLMMs with a poisson distribution are more appropriate than Linear Mixed Models. So We fit mixed models to number of SDBs per 10-minute to replicate our client's model and complete a sanity check to see if we have similar result/inference with client's. To address client's conern about the interaction term, models below are ....
 
 ```{r two-way poisson}
-poi.fit <- glmer(SDB ~ `Age-Sex of Focal`*`Social Y or N` + (1 | `Focal Orangutan ID`) + (1 | `Event ID`), data = mix_sdb, family = poisson(link = "log"))
+poi.fit <- stan_glmer(SDB ~ AgeSexFocal* SocialYN + (1 | FocalID) + (1 | EventID), data = mix_sdb, family = poisson(link = "log"))
 summary(poi.fit)
 ```
 ```{r two-way Negative Binomial}
 # GLMM with a negative binomial distribution
-nb.fit <-  glmer.nb(SDB ~ `Age-Sex of Focal` * `Social Y or N` + (1 | `Focal Orangutan ID`) + (1 | `Event ID`), data = mix_sdb)
+nb.fit <-  stan_glmer.nb(SDB ~ AgeSexFocal* SocialYN + (1 | FocalID) + (1 | EventID), data = mix_sdb)
 # summary(nb.fit)
 
 ```
@@ -81,13 +79,7 @@ In this section, we compare the model fit between Poisson and Negative Binomial 
 ```{r model diagnosis - dispersion}
 # check if overdispersion exists
 check_overdispersion(poi.fit)
-# Overdispersion test
-# 
-#        dispersion ratio =    1.293
-#   Pearson's Chi-Squared = 1969.500
-#                 p-value =  < 0.001
-# 
-# Overdispersion detected.
+
 
 # check dispersion parameter
 check_overdispersion(nb.fit)
@@ -134,53 +126,62 @@ qqline(residuals.nb, col = "red")
 
 *Rootogram*
 Rootgram is proposed as an improved approach to the assessment of fit of a count regression model, below is a side-by-side rootogram to compare the fit of Poisson model and negative binomial model.
-```{r model diagnosis - rootogram}
-# Create a histogram of the residuals and obtain the counts and bin edges
-hist_info <- hist(residuals, plot = FALSE)
-counts <- hist_info$counts
-bin_edges <- hist_info$breaks
+```{r rootgrams compare two models}
+library(bayesplot)
 
-# Calculate the expected frequency of residuals under a well-fitting Poisson model
-bin_centers <- (bin_edges[-length(bin_edges)] + bin_edges[-1]) / 2
-expected_probs <- diff(ppois(bin_edges, lambda = mean(observed)))
-expected_counts <- expected_probs * length(residuals)
+ppc_rootogram(mix_sdb$SDB,posterior_predict(poi.fit),style = "standing")
 
-# Create a histogram of the residuals and obtain the counts and bin edges
-hist_info.nb <- hist(residuals.nb, plot = FALSE)
-counts.nb <- hist_info.nb$counts
-bin_edges.nb <- hist_info.nb$breaks
+ppc_rootogram(mix_sdb$SDB,posterior_predict(nb.fit),style = "standing")
 
-# Calculate the expected frequency of residuals under a well-fitting Negative Binomial model
-bin_centers.nb <- (bin_edges.nb[-length(bin_edges.nb)] + bin_edges.nb[-1]) / 2
-rounded_bin_centers.nb <- round(bin_centers.nb)
-mu <- mean(observed.nb)
-size <- getME(nb.fit, "theta")
-prob <- size / (size + mu)
-expected_probs.nb <- dnbinom(rounded_bin_centers.nb, size = size, prob = prob)
-expected_counts.nb <- expected_probs.nb * length(residuals.nb)
+```
 
-# Combine observed and expected values for Poisson and Negative Binomial models
-poi_df <- data.frame(x = bin_centers, y_obs = sqrt(counts), y_exp = sqrt(expected_counts), Model = "Poisson")
-nb_df <- data.frame(x = bin_centers.nb, y_obs = sqrt(counts.nb), y_exp = sqrt(expected_counts.nb), Model = "Negative Binomial")
-combined_df <- rbind(poi_df, nb_df)
 
-# Reshape the data frame for ggplot2
-library(tidyr)
-combined_df_long <- combined_df %>% pivot_longer(c( -x, -Model),names_to = "Type", values_to  = "Frequency")
-
-# Create the rootogram using ggplot2
-ggplot(combined_df_long, aes(x = x, y = Frequency, color = Type, linetype = Type)) +
-  geom_point(aes(shape = Type), size = 2) +
-  geom_segment(data = combined_df_long, aes(xend = x, yend = 0), alpha = 0.5) +
-  facet_wrap(~ Model, scales = "free", ncol = 2) +
-  labs(title = "Rootograms", x = "Residuals", y = "Square root of frequency") +
-  theme_minimal() +
-  theme(legend.title = element_blank())
-
+```{r model diagnosis}
+# # Create a histogram of the residuals and obtain the counts and bin edges
+# hist_info <- hist(residuals, plot = FALSE)
+# counts <- hist_info$counts
+# bin_edges <- hist_info$breaks
+# 
+# # Calculate the expected frequency of residuals under a well-fitting Poisson model
+# bin_centers <- (bin_edges[-length(bin_edges)] + bin_edges[-1]) / 2
+# expected_probs <- diff(ppois(bin_edges, lambda = mean(observed)))
+# expected_counts <- expected_probs * length(residuals)
+# 
+# # Create a histogram of the residuals and obtain the counts and bin edges
+# hist_info.nb <- hist(residuals.nb, plot = FALSE)
+# counts.nb <- hist_info.nb$counts
+# bin_edges.nb <- hist_info.nb$breaks
+# 
+# # Calculate the expected frequency of residuals under a well-fitting Negative Binomial model
+# bin_centers.nb <- (bin_edges.nb[-length(bin_edges.nb)] + bin_edges.nb[-1]) / 2
+# rounded_bin_centers.nb <- round(bin_centers.nb)
+# mu <- mean(observed.nb)
+# size <- getME(nb.fit, "theta")
+# prob <- size / (size + mu)
+# expected_probs.nb <- dnbinom(rounded_bin_centers.nb, size = size, prob = prob)
+# expected_counts.nb <- expected_probs.nb * length(residuals.nb)
+# 
+# # Combine observed and expected values for Poisson and Negative Binomial models
+# poi_df <- data.frame(x = bin_centers, y_obs = sqrt(counts), y_exp = sqrt(expected_counts), Model = "Poisson")
+# nb_df <- data.frame(x = bin_centers.nb, y_obs = sqrt(counts.nb), y_exp = sqrt(expected_counts.nb), Model = "Negative Binomial")
+# combined_df <- rbind(poi_df, nb_df)
+# 
+# # Reshape the data frame for ggplot2
+# library(tidyr)
+# combined_df_long <- combined_df %>% pivot_longer(c( -x, -Model),names_to = "Type", values_to  = "Frequency")
+# 
+# # Create the rootogram using ggplot2
+# ggplot(combined_df_long, aes(x = x, y = Frequency, color = Type, linetype = Type)) +
+#   geom_point(aes(shape = Type), size = 2) +
+#   geom_segment(data = combined_df_long, aes(xend = x, yend = 0), alpha = 0.5) +
+#   facet_wrap(~ Model, scales = "free", ncol = 2) +
+#   labs(title = "Rootograms", x = "Residuals", y = "Square root of frequency") +
+#   theme_minimal() +
+#   theme(legend.title = element_blank())
 ```
 It can be seen that the poisson model is underfitting some data points as there are some negative residuals in the rootogram. The rootogram Negative Binomial model shows less data points deviates from the expected frequency and less underfitted data points. It's clear that negative binomial model has a better fit because less negative residuals in the rootogram. In a nutshell, we advocate for negative binomial model using dispersion and rootogram as assessment tool of model fit.
 
-The patterns in the residual plts and QQ plot in either model suggests that there are potential outliers or influential observations in our data. To investigate these observations further to understand their impact on our model, we examine the original data points that corresponds to the residuals with large deviations from the expected frequencies using the negtative binomial model. In the plot below, we manually choose the 0.5 as a threshold for large deviation from the expected frequencies. Among the 16 outliers, it's a clear cut that the focal Wahlimah would be a dominant factor that would impact our model.(which may verify our guesses about Walimah in EDA process).
+The patterns in the residual plots and QQ plot in either model suggests that there are potential outliers or influential observations in our data. To investigate these observations further to understand their impact on our model, we examine the original data points that corresponds to the residuals with large deviations from the expected frequencies using the negtative binomial model. In the plot below, we manually choose the 0.5 as a threshold for large deviation from the expected frequencies. Among the 16 outliers, it's a clear cut that the focal Wahlimah would be a dominant factor that would impact our model.(which may verify our guesses about Walimah in EDA process).
 
 ```{r}
 # Identify large deviations from the expected frequencies
@@ -217,20 +218,20 @@ ggplot(residuals_data, aes(x = fitted_values, y = residuals)) +
 Our client also want to examine how 
 
 ```{r}
-complex.fit1 <- glmer(SDB ~ `Age-Sex of Focal`*`Social Y or N` * `#AdoFemPresent`+ (1 | `Focal Orangutan ID`) + (1 | `Event ID`), data = mix_sdb,family = poisson(link = "log"))
+complex.fit1 <- stan_glmer.nb(SDB ~ AgeSexFocal* SocialYN + (1 | FocalID) + (1 | EventID) + (1 | `Event ID`), data = mix_sdb,family = poisson(link = "log"))
 ```
 
 ```{r}
-complex.fit2 <- glmer(SDB ~ `Age-Sex of Focal`*`Social Y or N`* `#AdultFemPreent`+ (1 | `Focal Orangutan ID`) + (1 | `Event ID`), data = mix_sdb,family = poisson(link = "log"))
+complex.fit2 <- stan_glmer.nb(SDB ~ AgeSexFocal* SocialYN + (1 | FocalID) + (1 | EventID) + (1 | `Event ID`), data = mix_sdb,family = poisson(link = "log"))
 ```
 
 ```{r}
-complex.fit3 <- glmer(SDB ~ `Age-Sex of Focal`*`Social Y or N`*`#UnflangedPresent` + (1 | `Focal Orangutan ID`) + (1 | `Event ID`), data = mix_sdb,family = poisson(link = "log"))
+complex.fit3 <- stan_glmer.nb(SDB ~ AgeSexFocal* SocialYN + (1 | FocalID) + (1 | EventID), data = mix_sdb,family = poisson(link = "log"))
 ```
 
 
 ```{r}
-complex.fit4 <- glmer(SDB ~ `Age-Sex of Focal`* `Social Y or N`* `#FlangedPresent` + (1 | `Focal Orangutan ID`) + (1 | `Event ID`), data = mix_sdb,family = poisson(link = "log"))
+complex.fit4 <- stan_glmer.nb(SDB ~ AgeSexFocal* SocialYN + (1 | FocalID) + (1 | EventID) + (1 | `Event ID`), data = mix_sdb,family = poisson(link = "log"))
 ```
 
 4 different situation - check if we have the same predictions 
@@ -238,25 +239,33 @@ complex.fit4 <- glmer(SDB ~ `Age-Sex of Focal`* `Social Y or N`* `#FlangedPresen
 In addition to replicate client's corrected model, we also explore the impact of the buffer effect and the effect of a special focal orangutan - Wahlimah on the rate of self-directed behavior.
 
 - buffer effect
-```{r}
+
+```{r buffer negative binomial Bayesian model}
 mix_sdb <- mix_sdb %>% mutate(`#AdolPresent`= rowSums(dplyr::select(.,c("#AdoFemPresent")))) %>% mutate(`#AdultPresent` = rowSums(dplyr::select(.,c("#AdultFemPreent","#FlangedPresent","#UnflangedPresent"))))
 
-AdolFem_Adul <- mix_sdb %>% filter(`Age-Sex of Focal` == "Adol Female" & `#AdultPresent`>0) 
+AdolFemFocal <- mix_sdb %>% filter(AgeSexFocal == "Adol Female")
 
-poi.fit <- glmer.nb(SDB ~ `Age-Sex of Focal` + `Social Y or N` + (1 | `Focal Orangutan ID`) + (1 | `Event ID`), data = AdolFem_Adul)
+# AdolFem_Adul %>% filter(`Focal Orangutan ID` == "Walimah")  
+#115/188 = 0.6117021
+
+library(brms)
+library(dplyr)
+
+AdolFem_Focal <- AdolFemFocal %>% dplyr::mutate(at_least_one_adol = `#AdolPresent`>0)%>% dplyr::mutate(at_least_one_adult = `#AdultPresent`>0)
+buffer.brm1 <- stan_glmer.nb(SDB ~ at_least_one_adol + (1 | FocalID) + (1 | EventID), data = AdolFem_Adul)
 ```
-
 - Walimah-only model
-Use the model from buffer effect with subset of wahlima data and get rid of random effect of focal ID
+Use the model from buffer effect with subset of Wahlima data and get rid of random effect of focal ID
 ```{r}
-Walimah <- mix_sdb %>% filter(`Focal Orangutan ID` == "Walimah") 
-
-walimah.fit <- glmer.nb(SDB ~ `Age-Sex of Focal` + `Social Y or N` + (1 | `Event ID`), data = Walimah)
+Walimah <- mix_sdb %>% filter(FocalID == "Walimah")
+walimah.fit <- stan_glmer.nb(SDB ~ AgeSexFocal + SocialYN + (1 |Event ID), data = Walimah)
 ```
 
 ## Conclusion
 To sum up, we recommend using GLMMs with negative binomial distribution to model the effect of ...
 
+And what effect we found in our model is significant 
 
+- buffer effect and Walimah
 
 

@@ -364,20 +364,20 @@ ggplot(residuals_data, aes(x = fitted_values, y = residuals)) +
 ## three way interaction - consider the effects of age-sex of social partners - play with combination of social partners
 
 ```{r}
-complex.fit1 <- glmer(SDB ~ `Age-Sex of Focal`*`Social Y or N` * `#`+ (1 | `Focal Orangutan ID`) + (1 | `Event ID`), data = mix_sdb,family = poisson(link = "log"))
+complex.fit1 <- stan_glmer(SDB ~ `Age-Sex of Focal`*`Social Y or N` * `#`+ (1 | `Focal Orangutan ID`) + (1 | `Event ID`), data = mix_sdb,family = poisson(link = "log"))
 ```
 
 ```{r}
-complex.fit2 <- glmer(SDB ~ `Age-Sex of Focal`*`Social Y or N` + (1 | `Focal Orangutan ID`) + (1 | `Event ID`), data = mix_sdb,family = poisson(link = "log"))
+complex.fit2 <- stan_glmer(SDB ~ `Age-Sex of Focal`*`Social Y or N` + (1 | `Focal Orangutan ID`) + (1 | `Event ID`), data = mix_sdb,family = poisson(link = "log"))
 ```
 
 ```{r}
-complex.fit3 <- glmer(SDB ~ `Age-Sex of Focal`*`Social Y or N` + (1 | `Focal Orangutan ID`) + (1 | `Event ID`), data = mix_sdb,family = poisson(link = "log"))
+complex.fit3 <- stan_glmer(SDB ~ `Age-Sex of Focal`*`Social Y or N` + (1 | `Focal Orangutan ID`) + (1 | `Event ID`), data = mix_sdb,family = poisson(link = "log"))
 ```
 
 
 ```{r}
-complex.fit4 <- glmer(SDB ~ age * sex + `Social Y or N` + (1 | `Focal Orangutan ID`) + (1 | `Event ID`), data = mix_sdb,family = poisson(link = "log"))
+complex.fit4 <- stan_glmer(SDB ~ age * sex + `Social Y or N` + (1 | `Focal Orangutan ID`) + (1 | `Event ID`), data = mix_sdb,family = poisson(link = "log"))
 ```
 
 
@@ -388,12 +388,12 @@ In addition to replicate client's corrected model, we also explore the impact of
 
 ```{r}
 # create two new variables(columns): # of adolescent present, # of adult present
-mix_sdb <- mix_sdb %>% 
-  mutate(`#AdolPresent`= rowSums(dplyr::select(.,c("#AdoFemPresent")))) %>% mutate(`#AdultPresent` = rowSums(dplyr::select(.,c("#AdultFemPreent","#FlangedPresent","#UnflangedPresent"))))
+AdolFem_Adul <- mix_sdb %>% filter(`Age-Sex of Focal` == "Adol Female" & `#AdultPresent`>0) 
+AdolFem_Adul <- AdolFem_Adul %>% mutate( `Age-Sex of Focal` = factor(AdolFem_Adul$`Age-Sex of Focal`),  `Social Y or N` = factor(AdolFem_Adul$`Social Y or N`, levels = c("Y", "N")),
+         `Focal Orangutan ID` = factor(AdolFem_Adul $`Focal Orangutan ID`),
+         `Event ID` = factor(AdolFem_Adul$`Event ID`))
 
-AdolFem <- mix_sdb %>% filter(`Age-Sex of Focal` == "Adol Female" & ....) 
-
-poi.fit <- glmer.nb(SDB ~ age * sex + `Social Y or N` + (1 | `Focal Orangutan ID`) + (1 | `Event ID`), data = AdolFem)
+buffer.nb <- glmer.nb(SDB ~ `Age-Sex of Focal` + `Social Y or N` + (1 | `Focal Orangutan ID`) + (1 | `Event ID`), data = AdolFem_Adul)
 ```
 
 
