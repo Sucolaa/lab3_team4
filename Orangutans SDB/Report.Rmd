@@ -1,0 +1,533 @@
+---
+title: "Report"
+author: "Hao He, Haochen Pan, Xu Su, Yeyang Han"
+date: "2023-04-27"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(readxl)
+library(tidyverse)
+library(scales)
+library(forcats)
+library(ggpubr)
+library(lme4)
+library(lmerTest)
+library(performance)
+library(PerformanceAnalytics)
+library(tibble)
+library(rstanarm)
+library(rstan)
+library(kableExtra)
+library(gridExtra)
+library(tidyr)
+library(bayesplot)
+```
+
+## Introduction
+
+This report aims to demonstrate the process of performing exploratory data analysis using visualizations to identify patterns in orangutan behavior. Additionally, We assess the effectiveness of our client's current model, as described in her paper, and explore alternative methods for potential improvements. Our client is from the Anthropology Department at the Boston University CAS School, and her capstone project focuses on the social behavior and endocrinology of wild orangutans. In her research paper, she examines the impact of multiple factors on the rate of specific behaviors under different social conditions.
+
+## Data Description
+
+Data collection was completed in an Indonesian's rainforest and lasted for a year, from 2014 to 2015. The client with her team observed focal animals and recorded their SDB (Self-Directed Behavior) with records of multiple important variables: **SDB Rate**: self-directed behavior, a rate recorded as #occurrences/10 minutes **Age-Sex of Focal** (4 types of age and sex groups): Adult Female, Adolescent Female, Flanged Male, and Unflanged Male **Social Y or N**: Has the social event occurred **Partner x Name/ Partner x Age-sex**: The ID and an age-sex group of participants in the social event
+
+## EDA
+
+### Preprocess data
+
+Both flanged and unflanged males are sexually mature adults, but they exhibit different physical and behavioral characteristics. It is important to note that unflanged males are not adolescents; they are fully mature adults. Besides, we convert the SDB rate to the count of the SDB and save it in a variable `SDB`.
+
+```{r r load raw data, warning=FALSE}
+sdb <- read_excel("SDB_Data for Stats Consult_O'Connell&Knott_2.17.23.xlsx", sheet = 1)
+
+
+# variable selection
+sdb %>% dplyr::select(AveSDBEventID, 
+         `Age-Sex of Focal`,
+         `Social Y or N`,
+         `Focal Orangutan ID`,
+         `Event ID`,
+         `SDB Rate`,
+         `#AdoFemPresent`,
+         `#UnflangedPresent`,
+         `#AdultFemPreent`,
+         `#FlangedPresent`) -> mix_sdb
+
+# convert social state, focal id and event id to factor
+mix_sdb<- mix_sdb %>% 
+  mutate( `Age-Sex of Focal` = factor(mix_sdb$`Age-Sex of Focal`),  
+          `Social Y or N` = factor(mix_sdb$`Social Y or N`, levels = c("Y", "N")),
+         `Focal Orangutan ID` = factor(mix_sdb$`Focal Orangutan ID`),
+         `Event ID` = factor(mix_sdb$`Event ID`))
+
+
+# add a new column that converts the sdb rate to the count of sdb. 
+mix_sdb %>% 
+  mutate(SDB = `SDB Rate` *10) %>% relocate(SDB) -> mix_sdb
+```
+
+We can further analyze the relationships between variables by utilizing EDA plots first.
+
+```{r, warning= FALSE, echo=FALSE, results='hide'}
+new_sdb <- sdb[!duplicated(sdb$`Event ID`),]
+
+new_sdb %>% 
+  filter(`Focal Orangutan ID`== "Dinda (Linda?)")
+# one variables cannot be confirmed, remove.
+new_sdb %>% 
+  filter(`Focal Orangutan ID`!= "Dinda (Linda?)") -> new_sdb
+
+freq_table <- table(new_sdb$`Social Y or N`)
+freq_df <- data.frame(variable = names(freq_table), freq = freq_table)
+freq_df %>% 
+  mutate(rate = round(freq.Freq/sum(freq.Freq),digits = 3)) -> freq_df
+freq_df$variable <- factor(freq_df$variable, levels = c("Y","N"))
+```
+
+The bar plot clearly indicates that the frequency of successful social events is significantly higher at 65%, as compared to the frequency of unsuccessful social events. This suggests that the factors contributing to the success of social events might be different from those leading to an unsuccessful outcome.
+
+```{r, warning=FALSE, echo=FALSE}
+ggplot(data = freq_df,
+       aes(x = variable,
+           y = freq.Freq)) +
+  geom_bar(fill = "black",
+           stat = "identity") +
+  geom_text(aes(label = freq.Freq), 
+            vjust = -0.3, hjust = 1) +
+  geom_text(aes(label = percent(rate)), 
+            vjust = -0.3, hjust = -0.5) +
+  labs(x = "Social(Yes or No)",
+       y = "Social Event Account",
+       title = "Social Event Frequency") +
+  theme_classic() +
+  theme(plot.title = element_text(hjust = 0.5,
+                                  face = "bold"))
+```
+
+To gain more insights into the frequency of successful social events, we created a new bar plot that separates the data by age and sex groups. Interestingly, the plot reveals that adolescent females have the highest frequency of successful social events.
+
+```{r, warning=FALSE, echo=FALSE}
+new_sdb %>% 
+  filter(`Social Y or N` == "N")  -> new_sdbn
+nasf <- table(new_sdbn$`Age-Sex of Focal`)
+nasf_df <- data.frame(variable = names(nasf), freq = nasf)
+colnames(nasf_df) <- c("variable", "freq.Var1", "Nfreq")
+
+new_sdb %>% 
+  filter(`Social Y or N` == "Y")  -> new_sdby
+yasf <- table(new_sdby$`Age-Sex of Focal`)
+yasf_df <- data.frame(variable = names(yasf), freq = yasf)
+colnames(yasf_df) <- c("variable", "freq.Var1", "Yfreq")
+
+asf_df <- full_join(yasf_df,nasf_df)
+pivot_longer(asf_df,
+             cols = c("Yfreq", "Nfreq"),
+             names_to = "YN",
+             values_to = "freq") %>% 
+  select(variable, YN, freq) -> asf_df
+
+asf_df$YN <- factor(asf_df$YN, levels = c("Yfreq","Nfreq"))
+asf_df$variable <- factor(asf_df$variable, levels = c("Adol Female",
+                                                      "Adult Female",
+                                                      "Unflanged",
+                                                      "Flanged"))
+
+## plot
+ggplot(data = asf_df,
+       aes(x = variable,
+           y = freq,
+           color = YN,
+           fill = YN)) +
+  geom_histogram(stat = "identity",
+                 position=position_dodge()) +
+  geom_text(aes(label = freq,
+                x = variable,
+                y = freq,
+                group = YN),
+            position = position_dodge(width = 1),
+            vjust = -0.5,
+            color = "black") +
+  labs(x = "Age and Sex of Focal Orangutan",
+       y = "Frequency",
+       title = "Different Age-Sex Orangutans Social Events Situation",
+       color = paste("Succesful\nSocial?"),
+       fill = "Succesful\nSocial?") +
+  scale_fill_discrete(labels = c("Yes", "No")) +
+  scale_color_discrete(labels = c("Yes", "No")) +
+  theme_classic() +
+  theme(plot.title = element_text(hjust = 0.5,
+                                  face = "bold"))
+```
+
+The bar plot represents the distribution of social frequency for each focal orangutan, with a notable finding that Walimah, the adolescent female orangutan, has the highest frequency and success rate compared to the other focal orangutans. This finding suggests that Walimah might play a more significant role in the social dynamics of the group, potentially influencing social behaviors and interactions among other orangutans.
+
+```{r,warning=FALSE, echo=FALSE}
+focal <- table(new_sdb$`Focal Orangutan ID`)
+focal_df <- data.frame(variable = names(focal), freq = focal)
+focal_df[order(focal_df$freq.Freq,decreasing = TRUE),] -> focal_df
+
+ggplot(data = focal_df,
+       aes(x = reorder(variable, freq.Freq),
+           y = freq.Freq)) +
+  geom_bar(stat = "identity",
+           fill = "black") +
+  geom_text(aes(label = freq.Freq,
+                x = reorder(variable, freq.Freq),
+                y = freq.Freq),
+            position = position_dodge(width = 1),
+            hjust = -0.2,
+            color = "black",
+            size = 3) +
+  labs(x = "Orangutan's name",
+       y = "social frequency",
+       title = "Focal Orangutan's Social Events Frequency")+
+  coord_flip() +
+  theme_classic() +
+  theme(plot.title = element_text(hjust = 0.5,
+                                  face = "bold"))
+
+focal_yn <- table(new_sdb$`Focal Orangutan ID`, new_sdb$`Social Y or N`)
+focal_yn_df <- as.data.frame(focal_yn)
+colnames(focal_yn_df) <- c("name", "social", "freq")
+focal_yn_df$social <- factor(focal_yn_df$social, levels = c("N", "Y"))
+
+focal_yn_df %>% 
+  ggplot(aes(x = reorder(name, freq),
+             y = freq,
+             group = social,
+             fill = social,
+             color = social)) +
+  geom_bar(stat = "identity",
+           position=position_dodge()) +
+  coord_flip()
+```
+
+Our analysis was further focused on Walimah, and we created a new bar plot to explore the frequency of successful social events for her. The plot clearly indicates that Walimah has a significantly higher rate of successful social events than other orangutans.
+
+```{r ,warning=FALSE, echo=FALSE}
+new_sdb %>% 
+  filter(`Focal Orangutan ID` == "Walimah") -> wali
+wali$`Social Y or N` <- factor(wali$`Social Y or N`,
+                               levels = c("Y", "N"))
+
+ggplot(data = wali,
+       aes(x = `Social Y or N`)) +
+  geom_bar(stat = "count",
+           fill = "black")
+```
+
+We also created a new bar plot to explore the partners and frequency of orangutans to Walimah. We noticed that even the 1 partner shows the most frequency, there are always situations that there are about 4 partners involved in the social event, which may be another reason that Walimah is a special case to see.
+
+```{r,warning=FALSE, echo=FALSE}
+wali %>% 
+  mutate(party_num = case_when(is.na(`Partner 1 Name`) == TRUE ~ "no social",
+                               is.na(`Partner 1 Name`) == FALSE & is.na(`Partner 2 Name`) == TRUE & is.na(`Partner 3 Name`) == TRUE & is.na(`Partner 4 Name`) == TRUE ~ "1 partner",
+                               is.na(`Partner 1 Name`) == FALSE & is.na(`Partner 2 Name`) == FALSE & is.na(`Partner 3 Name`) == TRUE & is.na(`Partner 4 Name`) == TRUE ~ "2 partners",
+                               is.na(`Partner 1 Name`) == FALSE & is.na(`Partner 2 Name`) == FALSE & is.na(`Partner 3 Name`) == FALSE & is.na(`Partner 4 Name`) == TRUE ~ "3 partners",
+                               is.na(`Partner 1 Name`) == FALSE & is.na(`Partner 2 Name`) == FALSE & is.na(`Partner 3 Name`) == FALSE & is.na(`Partner 4 Name`) == FALSE ~ "4 partners")) %>% 
+  group_by(party_num) %>% 
+  count() -> wali_party_num
+
+wali_party_num %>% 
+  mutate(rate = round(n/sum(wali_party_num$n),digits = 3)) -> wali_party_num
+
+wali_party_num$party_num <- factor(wali_party_num$party_num,
+                                  levels = c("no social",
+                                             "1 partner",
+                                             "2 partners",
+                                             "3 partners",
+                                             "4 partners"))
+wali_party_num %>% 
+  ggplot(aes(x = party_num,
+             y = n)) +
+  geom_bar(stat = "identity",
+           fill = "black") +
+  geom_text(aes(label = n),
+            vjust = -0.4,
+            hjust = 1.2) +
+  geom_text(aes(label = percent(rate)),
+            vjust = -0.4,
+            hjust = -0.2) +
+  labs(x = "social event's partner number",
+       y = "acount",
+       title = "Walimah's Social Events Partner Distribution") +
+  theme_classic() +
+  theme(plot.title = element_text(hjust = 0.5,
+                                  face = "bold"))
+```
+
+## Modeling
+
+### Model replication
+
+To model the count data of SDBs per 10-minute interval, Generalized Linear Mixed Model (GLMM) with a Poisson distribution were initially fitted, taking into account the discrete nature of the data. However, convergence issues were observed with the `glmer()` function from the `lme4` package. To overcome this, we recommended using Stan for Bayesian modeling, which provided a flexible and computationally efficient framework for fitting complex hierarchical models with count data, and allowed for more accurate estimation of model parameters and uncertainty quantification.
+
+To address the client's concern regarding the influence of various factors, we first fitted GLMMs using the two-way interaction between focal age-sex class and social state (social or solitary) with a Poisson distribution. However, overdispersion in the data prompted us to use the negative binomial GLMM, which provided a better fit compared to the Poisson GLMM by better capturing the variability in the count data. A subsequent sanity check was performed on the negative binomial GLMM, including a three-way interaction between focal age-sex class, social state (social or solitary), and count of social partners for each age-sex class.
+
+```{r modeling preprocess, echo=FALSE}
+# renmae and convert social state, focal id and event id to factor
+mix_sdb<- mix_sdb %>% 
+  dplyr::rename(AgeSexFocal = `Age-Sex of Focal`, SocialYN = `Social Y or N`, FocalID = `Focal Orangutan ID`, EventID = `Event ID`) 
+```
+
+```{r two-way poisson, echo=FALSE}
+# fit GLMM with Poisson
+poi.fit <- stan_glmer(SDB ~ AgeSexFocal* SocialYN + (1 | FocalID) + (1 | EventID), data = mix_sdb, family = poisson(link = "log"))
+print(poi.fit, digit = 3)
+```
+
+```{r two-way Negative Binomial, echo=FALSE}
+# fit GLMM with negative binomial distribution
+nb.fit <-  stan_glmer.nb(SDB ~ AgeSexFocal* SocialYN + (1 | FocalID) + (1 | EventID), data = mix_sdb)
+
+print(nb.fit, digit = 3)
+```
+
+-   model diagnosis
+
+**dispersion**
+
+```{r model diagnosis - dispersion,echo=FALSE}
+# Check for overdispersion
+check_overdispersion(poi.fit)
+
+# check dispersion parameter
+check_overdispersion(nb.fit)
+```
+
+Based on the summary of both models, the Poisson model was found to have overdispersion as the dispersion ratio was approximately 1.36, indicating that the variance of the data is greater than the mean. To address this issue, we fitted a GLMM using a negative binomial distribution instead. The negative binomial model has a dispersion parameter of approximately 0.77, which is expected to be lower than that of the Poisson model.
+
+**Residuals**
+
+Examining the residuals is an important criterion to assess the model fit of both the Poisson and negative binomial GLMMs. In the residuals plot of count data, patterns are expected due to the discrete nature of the observations. In the Poisson GLMM, the residuals showed greater variability than expected, with a steeper trend observed in the Q-Q plot after the value of 1 on the x-axis. On the other hand, the negative binomial GLMM (indicated by red dots) provided a better fit to the data, with residuals that were more consistent with the expected distribution under the fitted model.
+
+```{r model diagnosis - residuals, echo=FALSE}
+# poisson
+# Compute the Pearson residuals
+residuals.poi <- residuals(poi.fit, type = "pearson")
+
+# Create a dataframe with fitted values and residuals
+resid_poi <- data.frame(Predicted = fitted(poi.fit), Residuals = residuals.poi)
+
+# Create a dataframe with standardized residuals
+resid_std.poi <- data.frame(StdResid = residuals(poi.fit, type = "pearson", standardize = TRUE))
+
+# negative binomial
+# Compute the Pearson residuals
+residuals.nb <- residuals(nb.fit, type = "pearson")
+
+# Create a dataframe with fitted values and residuals
+resid_nb <- data.frame(Predicted = fitted(nb.fit), Residuals = residuals.nb)
+
+# Create a dataframe with standardized residuals
+resid_std.nb <- data.frame(StdResid = residuals(nb.fit, type = "pearson", standardize = TRUE))
+
+# combine residuals data
+resid_poi$Model <- "Poisson"
+resid_nb$Model <- "Negative Binomial"
+resid_combined <- rbind(resid_poi, resid_nb)
+
+# combine the Q-Q plot data
+resid_std.poi$Model <- "Poisson"
+resid_std.nb$Model <- "Negative Binomial"
+resid_std_combined <- rbind(resid_std.poi, resid_std.nb)
+```
+
+```{r residuals and Q-Q plot, echo=FALSE}
+combined_resid_plot <- ggplot(resid_combined, aes(x = Predicted, y = Residuals, color = Model)) +
+  geom_point(size = 1.5) +
+  ggtitle("Residuals Plot") +
+  xlab("Fitted values") +
+  ylab("Pearson residuals") +
+  scale_color_manual(values = c("Poisson" = "black", "Negative Binomial" = "red")) +
+  theme(legend.title = element_blank(), legend.position = "bottom")
+combined_qq_plot <- ggplot(resid_std_combined, aes(sample = StdResid, color = Model)) +
+  stat_qq() +
+  stat_qq_line() +
+  ggtitle("Q-Q Plot") +
+  xlab("Theoretical Quantiles") +
+  ylab("Standardized Residuals") +
+  scale_color_manual(values = c("Poisson" = "black", "Negative Binomial" = "red")) +
+  theme(legend.title = element_blank(), legend.position = "bottom")
+
+grid.arrange(combined_resid_plot, combined_qq_plot, ncol = 2)
+```
+
+**Rootogram**
+
+However, the use of residuals plots alone is not a good indicator of model fit for GLMMs with count data. As an improved approach to assess the fit of a count regression model, Rootgrams are proposed. Below is a side-by-side Rootogram comparison of the Poisson and negative binomial models.
+
+```{r model diagnosis - rootogram}
+# Create rootogram plots
+poi.root <- ppc_rootogram(mix_sdb$SDB, posterior_predict(poi.fit), style = "hanging") +
+  ggtitle("Poisson model")+scale_fill_manual(values = "red")
+
+nb.root <- ppc_rootogram(mix_sdb$SDB, posterior_predict(nb.fit), style = "hanging") +
+  ggtitle("negative binomial model")+scale_fill_manual(values = "red")
+
+# Put the plots side by side
+grid.arrange(poi.root, nb.root, nrow = 2)
+
+```
+
+Because this is a hanging rootogram, the rootogram can be thought of as relating to the fitted counts --- if a bar doesn't reach the zero line then the model over predicts a particular count bin, and if the bar exceeds the zero line it under predicts. Based on the analysis, it is evident that the Poisson model is underfitting some of the data points, resulting in negative residuals in the rootogram. On the other hand, the Negative Binomial model shows fewer data points deviating from the expected frequency, indicating a better fit with less underfitted data points. Therefore, the Negative Binomial model is recommended as a better fit based on the dispersion and rootogram assessment tools. Based on the results of the negative binomial model, it is evident that, holding the social state of the focal orangutan constant, adult orangutans tend to have a higher expected SDB compared to the expected SDB of adolescent females.
+
+However, it should be noted that both models suggest potential outliers or influential observations in the data, as indicated by the residual plots and QQ plot. To investigate this further and understand their impact on the model, the original data points corresponding to the residuals with large deviations from the expected frequencies were examined using the Negative Binomial model. A threshold of 3 was chosen manually for large deviations in residuals. Among the 36 outliers identified, the focal Wahlimah was found to have the highest counts and may be a dominant factor that impacts the model. This finding is consistent with the previous exploratory data analysis process.
+
+```{r outliers in residuals plot}
+# Identify the large deviations in residuals using a threshold of 3:
+threshold <- 3
+large_deviation_indices <- which(abs(resid_nb$Residuals) > threshold)
+
+# Extract the corresponding data points from the original dataset mix_sdb
+outliers <- mix_sdb[large_deviation_indices,]
+
+# Create a new data frame with the fitted values, residuals, and FocalID:
+residuals_data <- data.frame(
+  FittedValues = resid_nb$Predicted,
+  Residuals = resid_nb$Residuals,
+  FocalID = mix_sdb$FocalID
+)
+
+# Identify the outlier data points:
+outliers_data <- residuals_data[large_deviation_indices,]
+
+outliers_data %>% count(FocalID) %>% arrange(desc(n)) %>% kable() %>% kable_styling()
+
+# Create the scatterplot of residuals vs. fitted values and highlight the outliers:
+ggplot(residuals_data, aes(x = FittedValues, y = Residuals)) +
+  geom_point(alpha = 0.5) +
+  geom_point(data = outliers_data, aes(color = FocalID), size = 3) +
+  scale_color_discrete(name = "Focal ID") +
+  theme_minimal() +
+  labs(x = "Fitted values", y = "Residuals", title = "Residuals vs. Fitted values") +
+  geom_hline(yintercept = 0, linetype = "dashed", color = "red")
+
+```
+
+```{r outliers in Q-Q plot}
+# # choose threshold use IQR method
+# Q1 <- quantile(std_residuals_data$StdResid, 0.25)
+# Q3 <- quantile(std_residuals_data$StdResid, 0.75)
+# 
+# IQR <- Q3 - Q1
+# 
+# lower_bound <- Q1 - 1.5 * IQR
+# upper_bound <- Q3 + 1.5 * IQR
+# 
+# #
+# std_residuals_data <- data.frame(
+#   StdResid = resid_std.nb$StdResid,
+#   FocalID = mix_sdb$FocalID
+# )
+# 
+# 
+# large_deviation_indices_qq <- which(std_residuals_data$StdResid < lower_bound | std_residuals_data$StdResid > upper_bound)
+# 
+# outliers_qq <- mix_sdb[large_deviation_indices_qq,]
+# 
+# outliers_data_qq <- std_residuals_data[large_deviation_indices_qq,]
+# 
+# ggplot(std_residuals_data, aes(sample = StdResid, color = FocalID)) +
+#   stat_qq(aes(shape = factor(FocalID %in% outliers_qq$FocalID))) +
+#   stat_qq_line() +
+#   ggtitle("Negative Binomial Q-Q Plot with Outliers") +
+#   xlab("Theoretical Quantiles") +
+#   ylab("Standardized Residuals") +
+#   theme(legend.title = element_blank(), legend.position = "bottom") +
+#   scale_shape_discrete(name = "Outliers")
+
+
+```
+
+```{r}
+complex.fit1 <- stan_glmer.nb(SDB ~ AgeSexFocal* SocialYN*`#AdoFemPresent` + (1 | FocalID) + (1 | EventID), data = mix_sdb)
+
+print(complex.fit1, digit = 3)
+```
+
+```{r}
+complex.fit2 <- stan_glmer.nb(SDB ~ AgeSexFocal* SocialYN*`#UnflangedPresent` + (1 | FocalID) + (1 | EventID), data = mix_sdb)
+print(complex.fit2, digit = 3)
+```
+
+```{r}
+complex.fit3 <- stan_glmer.nb(SDB ~ AgeSexFocal* SocialYN*`#AdultFemPreent`  + (1 | FocalID) + (1 | EventID), data = mix_sdb)
+print(complex.fit3, digit = 3)
+```
+
+```{r}
+complex.fit4 <- stan_glmer.nb(SDB ~ AgeSexFocal* SocialYN*`#FlangedPresent` + (1 | FocalID) + (1 | EventID), data = mix_sdb)
+print(complex.fit4, digit = 3)
+```
+
+We fitted a series of more sophisticated negative binomial models to examine the effect of social partners on the SDB use the three-way interactions between the focal orangutan's age-sex class, social state, and the count of social partners of each age-sex class.
+
+In all four models, the main effect of SocialYN consistently shows a negative relationship between the presence of social partners (Y) and the rate of SDB. This suggests that, on average, focal orangutans exhibit lower rates of SDB when social partners are present, compared to when they are absent. This general observation is not consistent with client's predictions.
+
+In complex model 1, 2, and 3, adult females and flanged males show a positive interaction with SocialYNN, indicating that the reduction in SDB when social partners are present is less pronounced for these age-sex classes. In model 4, the interaction is positive for adult females but weaker for flanged males.
+
+In summary, the presence of social partners generally appears to be associated with lower rates of self-directed behavior across different age-sex classes of focal orangutans. However, the influence of specific social partners varies depending on the age-sex class of the focal orangutan and the presence or absence of other social partners.
+
+### Model Extensions
+
+In addition to replicating the client's model, we also fitted new models to investigate the influence of the buffer effect and the impact of a specific focal orangutan, Wahlimah, on the rate of self-directed behavior.
+
+#### Buffer Effect in Adolescent Female Orangutans
+
+In this case, the buffer effect refers to the expectation that adolescent female orangutans will have lower SDB rates when socializing with both other adolescent and adult social partners, while being associated with elevated SDB rates when socializing with only adult social partners. Two models were fitted to investigate this effect: the first model included adolescent social partners, while the second model included both adolescent and adult social partners.
+
+```{r}
+mix_sdb <- mix_sdb %>% mutate(`#AdolPresent`= rowSums(dplyr::select(.,c("#AdoFemPresent")))) %>% mutate(`#AdultPresent` = rowSums(dplyr::select(.,c("#AdultFemPreent","#FlangedPresent","#UnflangedPresent"))))
+
+AdolFemFocal <- mix_sdb %>% filter(AgeSexFocal == "Adol Female")
+
+# AdolFem_Adul %>% filter(`Focal Orangutan ID` == "Walimah")  
+#115/188 = 0.6117021
+
+
+AdolFem_Focal <- AdolFemFocal %>% dplyr::mutate(at_least_one_adol = `#AdolPresent`>0)%>% dplyr::mutate(at_least_one_adult = `#AdultPresent`>0)
+
+```
+
+```{r}
+buffer.adol.glmm <- stan_glmer.nb(SDB ~ at_least_one_adol + (1 | FocalID) + (1 | EventID), data = AdolFem_Focal )
+
+print(buffer.adol.glmm , digit = 3)
+
+```
+
+```{r}
+buffer.both.glmm <- stan_glmer.nb(SDB ~ at_least_one_adol + at_least_one_adult+ (1 | FocalID) + (1 | EventID), data = AdolFem_Focal )
+print(buffer.both.glmm, digit = 3)
+```
+
+In the first model (buffer.adol.glmm), the coefficient for the predictor at_least_one_adol is negative (-0.192). This suggests that when adolescent female orangutans socialize with at least one adolescent social partner, their SDB rate is lower than when they do not socialize with any adolescent social partners.
+
+In the second model (buffer.both.glmm), the coefficient for at_least_one_adol is also negative (-0.389), and the coefficient for at_least_one_adult is positive (0.658). This suggests that socializing with at least one adult social partner is associated with an elevated SDB rate in adolescent female orangutans, while socializing with at least one adolescent social partner still appears to have a buffering effect, reducing the rate of SDB.
+
+In short, these results provide evidence for the buffer effect. The presence of adolescent social partners seems to help buffer the elevated SDB associated with socializing with adult social partners in adolescent female orangutans.
+
+#### **Walimah-specific Model**
+
+To explore if the buffer effect exists in Walimah, a specific model was built based on the buffer effect model using a subset of Walimah's data. The random effect of focal ID was removed in this model to focus solely on the potential buffer effect in Walimah.
+
+```{r}
+Walimah <- mix_sdb %>% filter(FocalID == "Walimah") %>% dplyr::mutate(at_least_one_adol = `#AdolPresent`>0)%>% dplyr::mutate(at_least_one_adult = `#AdultPresent`>0)
+
+walimah.fit <- stan_glmer.nb(SDB ~ at_least_one_adol + at_least_one_adult + (1 | EventID), data = Walimah)
+
+print(walimah.fit, digit = 3)
+
+```
+
+The model results can be interpreted as follows: 1. The coefficient for `at_least_one_adol` is negative (-1.503), suggesting that when Walimah socializes with at least one adolescent social partner, her SDB rate is lower than when she does not socialize with any adolescent social partners. This aligns with the previously observed buffer effect. 2. The coefficient for `at_least_one_adult` is close to zero (-0.050) and has a relatively small MAD_SD (0.305), indicating that the presence of adult social partners does not have a strong impact on Walimah's SDB rate. This is different from the general pattern observed in adolescent female orangutans, where socializing with adult social partners was associated with elevated SDB rates.
+
+These results suggest that the buffer effect is also present in focal Walimah, as socializing with adolescent social partners is associated with a reduction in SDB rate. However, the impact of adult social partners on Walimah's SDB rate appears to be less pronounced compared to the general pattern observed among adolescent female orangutans.
+
+## Conclusion
+
+In conclusion, we suggest utilizing GLMMs with a negative binomial distribution for modeling the impact of variables on the SBD rate instead of Poisson models or linear mixed models. Our recommendation is based on the better fit observed for the negative binomial model using the rootgram method, which indicated fewer negative residuals. In addition, we found that there are evidence for buffer effect.
