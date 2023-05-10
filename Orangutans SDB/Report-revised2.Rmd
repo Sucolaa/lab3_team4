@@ -436,7 +436,7 @@ complex.fit4 <- stan_glmer.nb(SDB ~ AgeSexFocal* SocialYN*`#FlangedPresent` + (1
 print(complex.fit4, digit = 3)
 ```
 
-We fitted a series of more sophisticated negative binomial models to examine the effect of social partners on the SDB use the three-way interactions between the focal orangutan's age-sex class, social state, and the count of social partners of each age-sex class.
+We fitted a series of more flexible negative binomial models to examine the effect of social partners on the SDB use the three-way interactions between the focal orangutan's age-sex class, social state, and the count of social partners of each age-sex class.
 
 In all four models, the main effect of SocialYN consistently shows a negative relationship between the presence of social partners (Y) and the rate of SDB. This suggests that, on average, focal orangutans exhibit lower rates of SDB when social partners are present, compared to when they are absent. This general observation is not consistent with client's predictions.
 
